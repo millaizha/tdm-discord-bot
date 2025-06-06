@@ -14,7 +14,8 @@ from todomate import fetch_todo_items_today, generate_todo_summary_today, genera
 # Load environment variables
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
+TASKS_CHANNEL_ID = int(os.getenv("TASKS_CHANNEL_ID", "0"))
+CALLS_CHANNEL_ID = int(os.getenv("CALLS_CHANNEL_ID", "0"))
 USERS = json.loads(os.getenv("USERS", "{}"))
 
 REMINDER_INTERVALS = [120, 60, 30, 10, 5]
@@ -29,6 +30,7 @@ def index():
 # Initialize Discord bot
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
@@ -44,7 +46,7 @@ async def check_and_send_reminders():
 
     if any(now.hour == t.hour and now.minute == t.minute for t in send_times):
         summary = generate_todo_summary_today(USERS)
-        channel = bot.get_channel(CHANNEL_ID)
+        channel = bot.get_channel(TASKS_CHANNEL_ID)
         if summary:
             await channel.send(summary)
 
@@ -81,6 +83,37 @@ async def check_and_send_reminders():
                     await user.send(f"⏰ Reminder: **{todo['content']}** in {label}!")
                 except Exception as e:
                     print(f"❌ Could not DM <@{discord_id}>: {e}")
+
+# Voice channel event
+@bot.event
+async def on_voice_state_update(member, before, after):
+    member_id_str = str(member.id)
+
+    # User joined a voice channel
+    if before.channel is None and after.channel is not None:
+        if member_id_str in USERS:
+            try:
+                channel = bot.get_channel(CALLS_CHANNEL_ID)
+                for other_id in USERS:
+                    if other_id != member_id_str:
+                        await channel.send(
+                            f"📢 <@{other_id}>, <@{member_id_str}> just joined **{after.channel.name}**!"
+                        )
+            except Exception as e:
+                print(f"❌ Could not notify others about join: <@{member_id_str}>: {e}", flush=True)
+
+    # User left a voice channel
+    elif before.channel is not None and after.channel is None:
+        if member_id_str in USERS:
+            try:
+                channel = bot.get_channel(CALLS_CHANNEL_ID)
+                for other_id in USERS:
+                    if other_id != member_id_str:
+                        await channel.send(
+                            f"👋 <@{other_id}>, <@{member_id_str}> just left **{before.channel.name}**."
+                        )
+            except Exception as e:
+                print(f"❌ Could not notify others about leave: <@{member_id_str}>: {e}", flush=True)
 
 # Discord command: !today
 @bot.command(name="today")

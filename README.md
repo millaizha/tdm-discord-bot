@@ -1,6 +1,7 @@
 # 📝 Discord Todo Mate Reminder Bot
 
 This project is a Discord bot that sends todo reminders to a channel at scheduled times. It integrates with the [Todo Mate](https://www.todomate.net) API and supports multiple users.
+It also notifies other members if a member is in a voice call
 
 ---
 
@@ -9,6 +10,7 @@ This project is a Discord bot that sends todo reminders to a channel at schedule
 - Sends reminders 4 times a day (8 AM, 12 PM, 4 PM, and 8 PM Manila time)
 - Sends personal DMs for upcoming todos at 2 hours, 1 hour, 30 minutes, 10 minutes, and 5 minutes before their scheduled time
 - Allows manual fetching of today's or next 7 days' todos via a `!today` or `!week` command
+- Notifies other members if a member is in a call
 - Integrates with the Todo Mate API
 
 > 🔒 **Note**: The bot can only fetch todo lists of users that are **visible to the authenticated Todo Mate account**. 
@@ -50,7 +52,8 @@ flask
 
    ```env
    DISCORD_TOKEN=your_discord_bot_token
-   CHANNEL_ID=your_channel_id_as_integer
+   TASKS_CHANNEL_ID=your_channel_id_as_integer_to_send_todo
+   CALLS_CHANNEL_ID=your_channel_id_as_integer_to_send_call_notifs
    EMAIL=your_todomate_email
    PASSWORD=your_todomate_password
    USERS={"discord_user_id_1": "todomate_user_id_1", "discord_user_id_2": "todomate_user_id_2"}
