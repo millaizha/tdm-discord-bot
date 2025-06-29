@@ -102,6 +102,16 @@ async def send_tomorrow_summary():
         if summary:
             await channel.send(f"🌙 Here's what everyone has tomorrow:\n{summary}")
 
+# Task: Send backlog items at 6 AM
+@tasks.loop(minutes=1)
+async def send_backlog_summary():
+    now = datetime.now(ZoneInfo("Asia/Manila"))
+    if now.hour == 6 and now.minute == 0:
+        summary = generate_todo_summary_backlog(USERS)
+        channel = bot.get_channel(TASKS_CHANNEL_ID)
+        if summary:
+            await channel.send(f"📜 Here's the backlog of unfinished tasks:\n{summary}")
+
 # Voice channel join/leave notification
 @bot.event
 async def on_voice_state_update(member, before, after):

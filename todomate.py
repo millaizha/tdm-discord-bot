@@ -371,4 +371,4 @@ def generate_todo_summary_backlog(users_dict):
             response += f"• **{content}** (from {formatted_date})\n"
         response += "\n"
 
-    return response or "✅ No backlog items."
+    return response

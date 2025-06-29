@@ -20,7 +20,7 @@ It also notifies other members if a member is in a voice call
 ## 🛠️ Requirements
 
 - Python 3.9+
-- A Todo Mate account and user IDs
+- A Todo Mate account and user IDs (You must create another account that follows the users to fetch the todo lists)
 - A Discord Bot Token
 - Required Python packages (`requirements.txt`):
 
@@ -57,7 +57,7 @@ flask
    CALLS_CHANNEL_ID=your_channel_id_as_integer_to_send_call_notifs
    EMAIL=your_todomate_email
    PASSWORD=your_todomate_password
-   USERS={"discord_user_id_1": "todomate_user_id_1", "discord_user_id_2": "todomate_user_id_2"}
+   USERS={"discord_user_id_1": {"todomate":"todomate_user_id_1"}, "discord_user_id_2": {"todomate":"todomate_user_id_2"}}
    ```
 
    > 📌 `USERS` must be a JSON string where the keys are **Discord user IDs** and the values are **Todo Mate user IDs**.
