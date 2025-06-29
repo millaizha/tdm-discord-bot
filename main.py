@@ -1,7 +1,7 @@
 import os
 import json
 import threading
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import discord
@@ -9,7 +9,13 @@ from discord.ext import commands, tasks
 from flask import Flask
 from dotenv import load_dotenv
 
-from todomate import fetch_todo_items_today, generate_todo_summary_today, generate_todo_summary_week
+from todomate import (
+    fetch_todo_items_today,
+    generate_todo_summary_today,
+    generate_todo_summary_tomorrow,
+    generate_todo_summary_week,
+    generate_todo_summary_backlog
+)
 
 # Load environment variables
 load_dotenv()
@@ -31,28 +37,32 @@ def index():
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
+intents.members = True  # ✅ Required to fetch and edit member nicknames
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}", flush=True)
     check_and_send_reminders.start()
+    send_tomorrow_summary.start()
 
-# Background task to check reminders
+# Background task to check reminders and send today's summary
 @tasks.loop(minutes=1)
 async def check_and_send_reminders():
     now = datetime.now(ZoneInfo("Asia/Manila"))
     send_times = [time(8, 0), time(12, 0), time(16, 0), time(20, 0)]
 
+    # Send daily summaries at fixed times
     if any(now.hour == t.hour and now.minute == t.minute for t in send_times):
         summary = generate_todo_summary_today(USERS)
         channel = bot.get_channel(TASKS_CHANNEL_ID)
         if summary:
             await channel.send(summary)
 
+    # Per-user reminders
     raw_data = fetch_todo_items_today(USERS)
     todos_by_user = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
-    user_lookup = {v: k for k, v in USERS.items()}
+    user_lookup = {v["todomate"]: k for k, v in USERS.items() if "todomate" in v}
 
     for internal_id, todos in todos_by_user.items():
         discord_id = user_lookup.get(internal_id)
@@ -75,45 +85,45 @@ async def check_and_send_reminders():
                 try:
                     user = await bot.fetch_user(int(discord_id))
                     if delta_min >= 60:
-                        hours = delta_min // 60
-                        label = f"{hours} hour{'s' if hours > 1 else ''}"
+                        label = f"{delta_min // 60} hour(s)"
                     else:
                         label = f"{delta_min} minutes"
-
                     await user.send(f"⏰ Reminder: **{todo['content']}** in {label}!")
                 except Exception as e:
                     print(f"❌ Could not DM <@{discord_id}>: {e}")
 
-# Voice channel event
+# Task: Send tomorrow's todos at 10:30 PM
+@tasks.loop(minutes=1)
+async def send_tomorrow_summary():
+    now = datetime.now(ZoneInfo("Asia/Manila"))
+    if now.hour == 22 and now.minute == 30:
+        summary = generate_todo_summary_tomorrow(USERS)
+        channel = bot.get_channel(TASKS_CHANNEL_ID)
+        if summary:
+            await channel.send(f"🌙 Here's what everyone has tomorrow:\n{summary}")
+
+# Voice channel join/leave notification
 @bot.event
 async def on_voice_state_update(member, before, after):
     member_id_str = str(member.id)
 
-    # User joined a voice channel
-    if before.channel is None and after.channel is not None:
-        if member_id_str in USERS:
-            try:
-                channel = bot.get_channel(CALLS_CHANNEL_ID)
-                for other_id in USERS:
-                    if other_id != member_id_str:
-                        await channel.send(
-                            f"📢 <@{other_id}>, <@{member_id_str}> just joined **{after.channel.name}**!"
-                        )
-            except Exception as e:
-                print(f"❌ Could not notify others about join: <@{member_id_str}>: {e}", flush=True)
+    if member_id_str not in USERS:
+        return
 
-    # User left a voice channel
-    elif before.channel is not None and after.channel is None:
-        if member_id_str in USERS:
-            try:
-                channel = bot.get_channel(CALLS_CHANNEL_ID)
+    try:
+        channel = bot.get_channel(CALLS_CHANNEL_ID)
+        if before.channel is None and after.channel is not None:
+            if after.channel.id == CALLS_CHANNEL_ID and len(after.channel.members) == 1:
                 for other_id in USERS:
                     if other_id != member_id_str:
-                        await channel.send(
-                            f"👋 <@{other_id}>, <@{member_id_str}> just left **{before.channel.name}**."
-                        )
-            except Exception as e:
-                print(f"❌ Could not notify others about leave: <@{member_id_str}>: {e}", flush=True)
+                        await channel.send(f"📢 <@{other_id}>, <@{member_id_str}> just joined **{after.channel.name}**!")
+        elif before.channel is not None and after.channel is None:
+            if before.channel.id == CALLS_CHANNEL_ID:
+                for other_id in USERS:
+                    if other_id != member_id_str:
+                        await channel.send(f"👋 <@{other_id}>, <@{member_id_str}> just left **{before.channel.name}**.")
+    except Exception as e:
+        print(f"❌ Voice event error for <@{member_id_str}>: {e}")
 
 # Discord command: !today
 @bot.command(name="today")
@@ -125,6 +135,16 @@ async def today(ctx):
         await ctx.send("❌ An error occurred while fetching today's todos.")
         print("🚨 Error:", e, flush=True)
 
+# Discord command: !tom
+@bot.command(name="tom")
+async def tomorrow(ctx):
+    try:
+        summary = generate_todo_summary_tomorrow(USERS)
+        await ctx.send(summary if summary else "✅ No todos scheduled for tomorrow.")
+    except Exception as e:
+        await ctx.send("❌ An error occurred while fetching tomorrow's todos.")
+        print("🚨 Error:", e, flush=True)
+
 # Discord command: !week
 @bot.command(name="week")
 async def week(ctx):
@@ -133,6 +153,16 @@ async def week(ctx):
         await ctx.send(summary if summary else "✅ No upcoming todos.")
     except Exception as e:
         await ctx.send("❌ An error occurred while fetching upcoming todos.")
+        print("🚨 Error:", e, flush=True)
+
+# Discord command: !backlog
+@bot.command(name="backlog")
+async def backlog(ctx):
+    try:
+        summary = generate_todo_summary_backlog(USERS)
+        await ctx.send(summary if summary else "✅ No backlog items.")
+    except Exception as e:
+        await ctx.send("❌ An error occurred while fetching backlog items.")
         print("🚨 Error:", e, flush=True)
 
 # Run Flask in separate thread

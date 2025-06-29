@@ -7,9 +7,10 @@ It also notifies other members if a member is in a voice call
 
 ## 🚀 Features
 
-- Sends reminders 4 times a day (8 AM, 12 PM, 4 PM, and 8 PM Manila time)
+- Sends reminders 5 times a day (8 AM, 12 PM, 4 PM, 8 PM, and 10:30 PM Manila time)
 - Sends personal DMs for upcoming todos at 2 hours, 1 hour, 30 minutes, 10 minutes, and 5 minutes before their scheduled time
-- Allows manual fetching of today's or next 7 days' todos via a `!today` or `!week` command
+- Allows manual fetching of today, tommorow, or next 7 days' todos via a `!today`, `!tom`, or `!week` command
+- Can also fetch unfinished tasks from the past week via `!backlog` command
 - Notifies other members if a member is in a call
 - Integrates with the Todo Mate API
 
@@ -90,6 +91,7 @@ The bot sends automated reminders at:
 * **12:00 PM**
 * **04:00 PM**
 * **08:00 PM**
+* **10:30 PM** (Todo list for the following day)
 
 *All times are based on the `Asia/Manila` timezone.*
 
@@ -100,7 +102,9 @@ The bot sends automated reminders at:
 | Command  | Description                  |
 | -------- | ---------------------------- |
 | `!today` | Manually fetch today’s todos |
+| `!tom`   | Manually fetch tomorrow's todos |
 | `!week`  | Manually fetch todos for the next 7 days |
+| `!backlog` | Manually fetch unfinished todos from the past 7 days |
 
 ---
 

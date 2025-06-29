@@ -25,10 +25,16 @@ def get_week_ms():
     end = (start + timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=999000)
     return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
 
-load_dotenv() 
+# Function to get the previous month's range in milliseconds
+def get_prev_month_ms():
+    end = datetime.now(ZoneInfo("Asia/Manila")).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = (end - timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=999000)
+    return int(start.timestamp() * 1000), int(end.timestamp() * 1000)
+
+load_dotenv()
 
 # Authenticate via Firebase
-firebase_url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyCtSjt1LBEXmQnZdjD8DOPXBc5I1acm0Ew"
+firebase_url = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyCtSjt1LBEXmQnZdjD8DOPXBc5I1acm0Ew"
 
 def get_id_token():
     auth_payload = {
@@ -58,30 +64,37 @@ def fetch_todo_items_today(users):
     all_results = {}
     api_url, headers = get_id_token()
 
-    for label, user_id in users.items():
+    for discord_id, ids in users.items():
+        internal_id = ids.get("todomate")
+        if not internal_id:
+            continue
+
         data_payload = {
             "data": {
-                "feedModelId": user_id,
+                "feedModelId": internal_id,
                 "feedModelType": "user",
                 "startDate": start_time,
                 "endDate": end_time
             }
         }
 
-        res = requests.post(api_url, json=data_payload, headers=headers)
-        res.raise_for_status()
+        try:
+            res = requests.post(api_url, json=data_payload, headers=headers)
+            res.raise_for_status()
+            todo_items = res.json()["result"]["result"]["todoItems"]
 
-        todo_items = res.json()["result"]["result"]["todoItems"]
-        filtered = [
-            {
-                "content": item.get("content"),
-                "date": format_timestamp(item.get("date")),
-                "remindAt": format_timestamp(item.get("remindAt"))
-            }
-            for item in todo_items if not item.get("isDone", False)
-        ]
+            filtered = [
+                {
+                    "content": item.get("content"),
+                    "date": format_timestamp(item.get("date")),
+                    "remindAt": format_timestamp(item.get("remindAt"))
+                }
+                for item in todo_items if not item.get("isDone", False)
+            ]
 
-        all_results[user_id] = filtered
+            all_results[internal_id] = filtered
+        except Exception as e:
+            all_results[internal_id] = {"error": str(e)}
 
     return json.dumps(all_results, indent=2, ensure_ascii=False)
 
@@ -89,7 +102,7 @@ def fetch_todo_items_today(users):
 def generate_todo_summary_today(users_dict):
     raw = fetch_todo_items_today(users_dict)
     todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
-    user_id_lookup = {v: k for k, v in users_dict.items()}
+    user_id_lookup = {v["todomate"]: k for k, v in users_dict.items() if "todomate" in v}
     response = ""
 
     for internal_id, todos in todos_by_user.items():
@@ -110,7 +123,80 @@ def generate_todo_summary_today(users_dict):
             remind_at = todo.get("remindAt")
             if remind_at:
                 dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
-                time_part = dt.strftime('%I:%M %p').lstrip('0') 
+                time_part = dt.strftime('%I:%M %p').lstrip('0')
+                response += f"• **{content}** at {time_part}\n"
+            else:
+                response += f"• **{content}**\n"
+        response += "\n"
+
+    return response
+
+def fetch_todo_items_for_date(users, target_date):
+    start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=ZoneInfo("Asia/Manila"))
+    end = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=ZoneInfo("Asia/Manila"))
+
+    start_ms = int(start.timestamp() * 1000)
+    end_ms = int(end.timestamp() * 1000)
+
+    all_results = {}
+    api_url, headers = get_id_token()
+
+    for discord_id, ids in users.items():
+        internal_id = ids.get("todomate")
+        if not internal_id:
+            continue
+
+        data_payload = {
+            "data": {
+                "feedModelId": internal_id,
+                "feedModelType": "user",
+                "startDate": start_ms,
+                "endDate": end_ms
+            }
+        }
+
+        try:
+            res = requests.post(api_url, json=data_payload, headers=headers)
+            res.raise_for_status()
+            todo_items = res.json()["result"]["result"]["todoItems"]
+
+            filtered = [
+                {
+                    "content": item.get("content"),
+                    "date": format_timestamp(item.get("date")),
+                    "remindAt": format_timestamp(item.get("remindAt"))
+                }
+                for item in todo_items if not item.get("isDone", False)
+            ]
+
+            all_results[internal_id] = filtered
+        except Exception as e:
+            all_results[internal_id] = {"error": str(e)}
+
+    return json.dumps(all_results, indent=2, ensure_ascii=False)
+
+def generate_todo_summary_tomorrow(users_dict):
+    target_date = datetime.now(ZoneInfo("Asia/Manila")).date() + timedelta(days=1)
+    raw = fetch_todo_items_for_date(users_dict, target_date)
+    todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
+    user_id_lookup = {v["todomate"]: k for k, v in users_dict.items() if "todomate" in v}
+    response = ""
+
+    for internal_id, todos in todos_by_user.items():
+        discord_id = user_id_lookup.get(internal_id)
+        if not discord_id:
+            continue
+
+        if not todos:
+            continue
+
+        response += f"\n📌 Tomorrow's todos for <@{discord_id}>:\n"
+        for todo in todos:
+            content = todo.get("content", "No content")
+            remind_at = todo.get("remindAt")
+            if remind_at:
+                dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
+                time_part = dt.strftime('%I:%M %p').lstrip('0')
                 response += f"• **{content}** at {time_part}\n"
             else:
                 response += f"• **{content}**\n"
@@ -124,30 +210,37 @@ def fetch_todo_items_week(users):
     all_results = {}
     api_url, headers = get_id_token()
 
-    for label, user_id in users.items():
+    for discord_id, ids in users.items():
+        internal_id = ids.get("todomate")
+        if not internal_id:
+            continue
+
         data_payload = {
             "data": {
-                "feedModelId": user_id,
+                "feedModelId": internal_id,
                 "feedModelType": "user",
                 "startDate": start_time,
                 "endDate": end_time
             }
         }
 
-        res = requests.post(api_url, json=data_payload, headers=headers)
-        res.raise_for_status()
+        try:
+            res = requests.post(api_url, json=data_payload, headers=headers)
+            res.raise_for_status()
+            todo_items = res.json()["result"]["result"]["todoItems"]
 
-        todo_items = res.json()["result"]["result"]["todoItems"]
-        filtered = [
-            {
-                "content": item.get("content"),
-                "date": format_timestamp(item.get("date")),
-                "remindAt": format_timestamp(item.get("remindAt"))
-            }
-            for item in todo_items if not item.get("isDone", False)
-        ]
+            filtered = [
+                {
+                    "content": item.get("content"),
+                    "date": format_timestamp(item.get("date")),
+                    "remindAt": format_timestamp(item.get("remindAt"))
+                }
+                for item in todo_items if not item.get("isDone", False)
+            ]
 
-        all_results[user_id] = filtered
+            all_results[internal_id] = filtered
+        except Exception as e:
+            all_results[internal_id] = {"error": str(e)}
 
     return json.dumps(all_results, indent=2, ensure_ascii=False)
 
@@ -155,7 +248,7 @@ def fetch_todo_items_week(users):
 def generate_todo_summary_week(users_dict):
     raw = fetch_todo_items_week(users_dict)
     todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
-    user_id_lookup = {v: k for k, v in users_dict.items()}
+    user_id_lookup = {v["todomate"]: k for k, v in users_dict.items() if "todomate" in v}
     todos_by_date = defaultdict(lambda: defaultdict(list))
 
     for internal_id, todos in todos_by_user.items():
@@ -168,13 +261,13 @@ def generate_todo_summary_week(users_dict):
             continue
 
         for todo in todos:
-            date_key = todo.get("date", "Unknown Date").split()[0] 
+            date_key = todo.get("date", "Unknown Date").split()[0]
             content = todo.get("content", "No content")
             remind_at = todo.get("remindAt")
             todo_str = f"• **{content}**"
             if remind_at:
                 dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
-                time_part = dt.strftime('%I:%M %p').lstrip('0') 
+                time_part = dt.strftime('%I:%M %p').lstrip('0')
                 todo_str += f" at {time_part}"
             todos_by_date[date_key][discord_id].append(todo_str)
 
@@ -183,9 +276,9 @@ def generate_todo_summary_week(users_dict):
         try:
             formatted_date = datetime.strptime(date, "%Y-%m-%d").strftime("%b %d %Y (%A)")
         except ValueError:
-            formatted_date = date 
+            formatted_date = date
         response += f"📅 **{formatted_date}**\n"
-        
+
         for user_id, todos in todos_by_date[date].items():
             response += f"<@{user_id}>:\n"
             for todo in todos:
@@ -194,3 +287,88 @@ def generate_todo_summary_week(users_dict):
         response += "\n"
 
     return response or "✅ No upcoming todos in the next 7 days."
+
+def fetch_backlog_items(users):
+    start_time, end_time = get_prev_month_ms()
+    print(f"Fetching backlog items from {format_timestamp(start_time)} to {format_timestamp(end_time)}")
+
+    all_results = {}
+    api_url, headers = get_id_token()
+
+    for label, user_data in users.items():
+        if not isinstance(user_data, dict) or "todomate" not in user_data:
+            continue  # skip invalid format
+
+        user_id = user_data["todomate"]
+
+        data_payload = {
+            "data": {
+                "feedModelId": user_id,
+                "feedModelType": "user",
+                "startDate": start_time,
+                "endDate": end_time
+            }
+        }
+
+        try:
+            res = requests.post(api_url, json=data_payload, headers=headers)
+            res.raise_for_status()
+            result_json = res.json()
+
+            # ✅ Handle missing or null structure gracefully
+            nested_result = result_json.get("result", {}).get("result")
+            if not nested_result:
+                print(f"ℹ️ No nested result for {label}: {json.dumps(result_json, indent=2)}")
+                all_results[user_id] = []
+                continue
+
+            todo_items = nested_result.get("todoItems", [])
+
+            filtered = [
+                {
+                    "content": item.get("content"),
+                    "date": format_timestamp(item.get("date")),
+                    "remindAt": format_timestamp(item.get("remindAt")),
+                }
+                for item in todo_items
+                if not item.get("isDone", False)
+            ]
+
+            all_results[user_id] = filtered
+
+        except Exception as e:
+            print(f"❌ Error fetching backlog for user {label} ({user_id}): {e}")
+            all_results[user_id] = {"error": str(e)}
+
+    return json.dumps(all_results, indent=2, ensure_ascii=False)
+
+def generate_todo_summary_backlog(users_dict):
+    raw = fetch_backlog_items(users_dict)
+    todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
+    user_lookup = {v["todomate"]: k for k, v in users_dict.items() if "todomate" in v}
+    response = ""
+
+    for internal_id, todos in todos_by_user.items():
+        discord_id = user_lookup.get(internal_id)
+        if not discord_id:
+            continue
+
+        if isinstance(todos, dict) and "error" in todos:
+            response += f"<@{discord_id}> ⚠️ Error: {todos['error']}\n"
+            continue
+
+        if not todos:
+            continue
+
+        response += f"\n🕗 Backlog for <@{discord_id}>:\n"
+        for todo in todos:
+            content = todo.get("content", "No content")
+            date = todo.get("date", "Unknown date")
+            try:
+                formatted_date = datetime.strptime(date, "%Y-%m-%d %I:%M:%S %p").strftime("%b %d")
+            except Exception:
+                formatted_date = date
+            response += f"• **{content}** (from {formatted_date})\n"
+        response += "\n"
+
+    return response or "✅ No backlog items."
