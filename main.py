@@ -45,6 +45,7 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}", flush=True)
     check_and_send_reminders.start()
     send_tomorrow_summary.start()
+    send_backlog_summary.start()
 
 # Background task to check reminders and send today's summary
 @tasks.loop(minutes=1)
