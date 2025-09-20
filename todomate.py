@@ -82,12 +82,15 @@ def fetch_todo_items_today(users):
             res = requests.post(api_url, json=data_payload, headers=headers)
             res.raise_for_status()
             todo_items = res.json()["result"]["result"]["todoItems"]
+            goals = res.json()["result"]["result"]["goals"]
+            goal_map = {goal["id"]: goal["title"] for goal in goals}
 
             filtered = [
                 {
                     "content": item.get("content"),
                     "date": format_timestamp(item.get("date")),
-                    "remindAt": format_timestamp(item.get("remindAt"))
+                    "remindAt": format_timestamp(item.get("remindAt")),
+                    "category": goal_map.get(item.get("goalID"))
                 }
                 for item in todo_items if not item.get("isDone", False)
             ]
@@ -98,7 +101,6 @@ def fetch_todo_items_today(users):
 
     return json.dumps(all_results, indent=2, ensure_ascii=False)
 
-# Function to format today's summary
 def generate_todo_summary_today(users_dict):
     raw = fetch_todo_items_today(users_dict)
     todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
@@ -117,17 +119,23 @@ def generate_todo_summary_today(users_dict):
         if not todos:
             continue
 
-        response += f"\n📌 Todos for <@{discord_id}>:\n"
+        grouped = defaultdict(list)
         for todo in todos:
-            content = todo.get("content", "No content")
-            remind_at = todo.get("remindAt")
-            if remind_at:
-                dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
-                time_part = dt.strftime('%I:%M %p').lstrip('0')
-                response += f"• **{content}** at {time_part}\n"
-            else:
-                response += f"• **{content}**\n"
-        response += "\n"
+            grouped[todo.get("category", "Uncategorized")].append(todo)
+
+        response += f"\n📌 Todos for <@{discord_id}>:\n"
+        for category, items in grouped.items():
+            response += f"**{category}**\n"
+            for todo in items:
+                content = todo.get("content", "No content")
+                remind_at = todo.get("remindAt")
+                if remind_at:
+                    dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
+                    time_part = dt.strftime('%I:%M %p').lstrip('0')
+                    response += f"  • {content} at {time_part}\n"
+                else:
+                    response += f"  • {content}\n"
+            response += "\n"
 
     return response
 
@@ -190,17 +198,23 @@ def generate_todo_summary_tomorrow(users_dict):
         if not todos:
             continue
 
-        response += f"\n📌 Tomorrow's todos for <@{discord_id}>:\n"
+        grouped = defaultdict(list)
         for todo in todos:
-            content = todo.get("content", "No content")
-            remind_at = todo.get("remindAt")
-            if remind_at:
-                dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
-                time_part = dt.strftime('%I:%M %p').lstrip('0')
-                response += f"• **{content}** at {time_part}\n"
-            else:
-                response += f"• **{content}**\n"
-        response += "\n"
+            grouped[todo.get("category", "Uncategorized")].append(todo)
+
+        response += f"\n📌 Tomorrow's todos for <@{discord_id}>:\n"
+        for category, items in grouped.items():
+            response += f"**{category}**\n"
+            for todo in items:
+                content = todo.get("content", "No content")
+                remind_at = todo.get("remindAt")
+                if remind_at:
+                    dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
+                    time_part = dt.strftime('%I:%M %p').lstrip('0')
+                    response += f"  • {content} at {time_part}\n"
+                else:
+                    response += f"  • {content}\n"
+            response += "\n"
 
     return response
 
@@ -249,7 +263,7 @@ def generate_todo_summary_week(users_dict):
     raw = fetch_todo_items_week(users_dict)
     todos_by_user = json.loads(raw) if isinstance(raw, str) else raw
     user_id_lookup = {v["todomate"]: k for k, v in users_dict.items() if "todomate" in v}
-    todos_by_date = defaultdict(lambda: defaultdict(list))
+    todos_by_date = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
     for internal_id, todos in todos_by_user.items():
         discord_id = user_id_lookup.get(internal_id)
@@ -257,19 +271,22 @@ def generate_todo_summary_week(users_dict):
             continue
 
         if isinstance(todos, dict) and "error" in todos:
-            todos_by_date["Errors"][discord_id].append(f"⚠️ Error: {todos['error']}")
+            todos_by_date["Errors"][discord_id]["Errors"].append(f"⚠️ Error: {todos['error']}")
             continue
 
         for todo in todos:
             date_key = todo.get("date", "Unknown Date").split()[0]
+            category = todo.get("category", "Uncategorized")
             content = todo.get("content", "No content")
             remind_at = todo.get("remindAt")
-            todo_str = f"• **{content}**"
+
+            todo_str = f"• {content}"
             if remind_at:
                 dt = datetime.strptime(remind_at, '%Y-%m-%d %I:%M:%S %p')
                 time_part = dt.strftime('%I:%M %p').lstrip('0')
                 todo_str += f" at {time_part}"
-            todos_by_date[date_key][discord_id].append(todo_str)
+
+            todos_by_date[date_key][discord_id][category].append(todo_str)
 
     response = ""
     for date in sorted(todos_by_date.keys()):
@@ -279,15 +296,18 @@ def generate_todo_summary_week(users_dict):
             formatted_date = date
         response += f"📅 **{formatted_date}**\n"
 
-        for user_id, todos in todos_by_date[date].items():
+        for user_id, categories in todos_by_date[date].items():
             response += f"<@{user_id}>:\n"
-            for todo in todos:
-                response += f"{todo}\n"
-            response += "\n"
+            for category, items in categories.items():
+                response += f"**{category}**\n"
+                for todo in items:
+                    response += f"  {todo}\n"
+                response += "\n"
         response += "\n"
 
     return response or "✅ No upcoming todos in the next 7 days."
 
+# Function to fetch backlog items (incomplete tasks from previous periods)
 def fetch_backlog_items(users):
     start_time, end_time = get_prev_month_ms()
     print(f"Fetching backlog items from {format_timestamp(start_time)} to {format_timestamp(end_time)}")
@@ -360,15 +380,21 @@ def generate_todo_summary_backlog(users_dict):
         if not todos:
             continue
 
-        response += f"\n🕗 Backlog for <@{discord_id}>:\n"
+        grouped = defaultdict(list)
         for todo in todos:
-            content = todo.get("content", "No content")
-            date = todo.get("date", "Unknown date")
-            try:
-                formatted_date = datetime.strptime(date, "%Y-%m-%d %I:%M:%S %p").strftime("%b %d")
-            except Exception:
-                formatted_date = date
-            response += f"• **{content}** (from {formatted_date})\n"
-        response += "\n"
+            grouped[todo.get("category", "Uncategorized")].append(todo)
+
+        response += f"\n🕗 Backlog for <@{discord_id}>:\n"
+        for category, items in grouped.items():
+            response += f"**{category}**\n"
+            for todo in items:
+                content = todo.get("content", "No content")
+                date = todo.get("date", "Unknown date")
+                try:
+                    formatted_date = datetime.strptime(date, "%Y-%m-%d %I:%M:%S %p").strftime("%b %d")
+                except Exception:
+                    formatted_date = date
+                response += f"  • {content} (from {formatted_date})\n"
+            response += "\n"
 
     return response
