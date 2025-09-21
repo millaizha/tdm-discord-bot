@@ -166,13 +166,18 @@ def fetch_todo_items_for_date(users, target_date):
         try:
             res = requests.post(api_url, json=data_payload, headers=headers)
             res.raise_for_status()
-            todo_items = res.json()["result"]["result"]["todoItems"]
+            result = res.json()["result"]["result"]
+
+            todo_items = result["todoItems"]
+            goals = result.get("goals", [])
+            goal_map = {goal["id"]: goal["title"] for goal in goals}
 
             filtered = [
                 {
                     "content": item.get("content"),
                     "date": format_timestamp(item.get("date")),
-                    "remindAt": format_timestamp(item.get("remindAt"))
+                    "remindAt": format_timestamp(item.get("remindAt")),
+                    "category": goal_map.get(item.get("goalID"))
                 }
                 for item in todo_items if not item.get("isDone", False)
             ]
@@ -241,13 +246,18 @@ def fetch_todo_items_week(users):
         try:
             res = requests.post(api_url, json=data_payload, headers=headers)
             res.raise_for_status()
-            todo_items = res.json()["result"]["result"]["todoItems"]
+            result = res.json()["result"]["result"]
+
+            todo_items = result["todoItems"]
+            goals = result.get("goals", [])
+            goal_map = {goal["id"]: goal["title"] for goal in goals}
 
             filtered = [
                 {
                     "content": item.get("content"),
                     "date": format_timestamp(item.get("date")),
-                    "remindAt": format_timestamp(item.get("remindAt"))
+                    "remindAt": format_timestamp(item.get("remindAt")),
+                    "category": goal_map.get(item.get("goalID"))
                 }
                 for item in todo_items if not item.get("isDone", False)
             ]
@@ -333,22 +343,23 @@ def fetch_backlog_items(users):
         try:
             res = requests.post(api_url, json=data_payload, headers=headers)
             res.raise_for_status()
-            result_json = res.json()
+            result = res.json()["result"]["result"]
 
-            # ✅ Handle missing or null structure gracefully
-            nested_result = result_json.get("result", {}).get("result")
-            if not nested_result:
-                print(f"ℹ️ No nested result for {label}: {json.dumps(result_json, indent=2)}")
+            if not result:
+                print(f"ℹ️ No nested result for {label}: {json.dumps(res.json(), indent=2)}")
                 all_results[user_id] = []
                 continue
 
-            todo_items = nested_result.get("todoItems", [])
+            todo_items = result.get("todoItems", [])
+            goals = result.get("goals", [])
+            goal_map = {goal["id"]: goal["title"] for goal in goals}
 
             filtered = [
                 {
                     "content": item.get("content"),
                     "date": format_timestamp(item.get("date")),
                     "remindAt": format_timestamp(item.get("remindAt")),
+                    "category": goal_map.get(item.get("goalID"))
                 }
                 for item in todo_items
                 if not item.get("isDone", False)
